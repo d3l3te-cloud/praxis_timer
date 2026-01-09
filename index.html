@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QuestTimer Elite - Sequential</title>
+    <title>QuestTimer Elite - Continuous</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -39,7 +39,6 @@
         .log-entry.active { border-color: var(--active); background: rgba(34, 197, 94, 0.1); }
         .log-entry b { color: var(--primary); }
 
-        /* Responsive stack for mobile */
         @media (max-width: 600px) {
             #timer { font-size: 3.5rem; }
             .video-box { flex: 1 1 100%; }
@@ -61,7 +60,7 @@
         </div>
 
         <div class="timer-box">
-            <div id="active-q-label">Current: Question 1</div>
+            <div id="active-q-label">Working on: Question 1</div>
             <div id="timer">00:00.00</div>
             
             <div class="btn-group">
@@ -102,12 +101,15 @@
             const delta = now - lastTickTime;
             lastTickTime = now;
 
-            // Track time for active question AND total session
+            // Update individual question time
             questionData[activeQuestionIndex].timeMs += delta;
+            // Update continuous total time
             totalSessionTimeMs += delta;
+            
             questionData[activeQuestionIndex].lastTimestamp = new Date().toLocaleTimeString();
             
-            timerDisplay.innerText = formatTime(questionData[activeQuestionIndex].timeMs);
+            // MAIN TIMER IS NOW CONTINUOUS
+            timerDisplay.innerText = formatTime(totalSessionTimeMs);
             renderLogs();
             requestAnimationFrame(update);
         }
@@ -127,32 +129,24 @@
             }
         }
 
-        // --- THE "ALWAYS NEW" LOGIC ---
         function forceNextQuestion() {
             if (!isRunning) return;
-            
-            // Increment ID based on the total count ever created
             const newId = questionData.length + 1;
             questionData.push({ id: newId, timeMs: 0, lastTimestamp: '' });
-            
-            // Always set active index to the newly created question
             activeQuestionIndex = questionData.length - 1;
             
             statusPill.innerText = `Created New Q${newId}`;
-            document.getElementById('active-q-label').innerText = `Current: Question ${newId}`;
-            timerDisplay.innerText = "00:00.00";
+            document.getElementById('active-q-label').innerText = `Working on: Question ${newId}`;
         }
 
         function switchQuestion(index) {
             activeQuestionIndex = index;
-            document.getElementById('active-q-label').innerText = `Current: Question ${questionData[index].id}`;
-            timerDisplay.innerText = formatTime(questionData[index].timeMs);
+            document.getElementById('active-q-label').innerText = `Working on: Question ${questionData[index].id}`;
             renderLogs();
         }
 
         function renderLogs() {
             logList.innerHTML = '';
-            // We show logs in reverse order (newest on top)
             for (let i = questionData.length - 1; i >= 0; i--) {
                 const q = questionData[i];
                 const div = document.createElement('div');
@@ -172,7 +166,7 @@
             const sName = document.getElementById('sessionName').value || "QuestTimer Session";
             
             doc.setFontSize(22);
-            doc.setTextColor(168, 85, 247); // Primary color
+            doc.setTextColor(168, 85, 247);
             doc.text(sName, 20, 20);
             
             doc.setFontSize(10);
@@ -186,13 +180,11 @@
             questionData.forEach((q, i) => {
                 const yPos = 50 + (i * 10);
                 doc.text(`Q${q.id}`, 20, yPos);
-                doc.text(`Duration: ${formatTime(q.timeMs)}`, 50, yPos);
-                doc.text(`Last Active: ${q.lastTimestamp}`, 120, yPos);
-                
+                doc.text(`Active Time: ${formatTime(q.timeMs)}`, 50, yPos);
+                doc.text(`Last Activity: ${q.lastTimestamp}`, 120, yPos);
                 if (yPos > 270) { doc.addPage(); }
             });
 
-            // Footer with Total Time
             const finalY = doc.internal.pageSize.height - 20;
             doc.line(20, finalY - 5, 190, finalY - 5);
             doc.setFontSize(14);
@@ -201,7 +193,6 @@
             doc.save(`${sName.replace(/\s+/g, '_')}_report.pdf`);
         }
 
-        // --- AI ENGINE ---
         function onResults(results) {
             const canvasCtx = document.getElementById('output_canvas').getContext('2d');
             canvasCtx.clearRect(0, 0, 640, 480);
