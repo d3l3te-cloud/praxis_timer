@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PraxisTimer Elite - Continuous</title>
+    <title>QuestTimer Elite - Continuous</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -48,7 +48,7 @@
 <body>
 
     <div class="header">
-        <h1>PraxisTimer <span style="color:var(--primary)">Elite</span></h1>
+        <h1>QuestTimer <span style="color:var(--primary)">Elite</span></h1>
         <input type="text" id="sessionName" placeholder="Enter Session Name...">
     </div>
 
@@ -163,7 +163,7 @@
         function exportPDF() {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
-            const sName = document.getElementById('sessionName').value || "PraxisTimer Session";
+            const sName = document.getElementById('sessionName').value || "QuestTimer Session";
             
             doc.setFontSize(22);
             doc.setTextColor(168, 85, 247);
@@ -224,4 +224,3 @@
     </script>
 </body>
 </html>
-
