@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuestTimer Elite - Sequential</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <style>
+        :root { --primary: #a855f7; --bg: #09090b; --card: #18181b; --text: #fafafa; --active: #22c55e; }
+        * { box-sizing: border-box; transition: all 0.2s ease; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 15px; display: flex; flex-direction: column; align-items: center; }
+
+        .header { text-align: center; margin-bottom: 20px; width: 100%; }
+        input#sessionName { background: var(--card); border: 1px solid #3f3f46; color: white; padding: 12px; border-radius: 8px; width: 100%; max-width: 400px; font-size: 1rem; text-align: center; outline: none; }
+        input#sessionName:focus { border-color: var(--primary); }
+
+        .main-layout { display: flex; flex-wrap: wrap; gap: 20px; max-width: 1200px; width: 100%; justify-content: center; }
+
+        .video-box { flex: 1 1 400px; background: #000; border-radius: 15px; overflow: hidden; position: relative; aspect-ratio: 4/3; border: 1px solid #27272a; }
+        video, canvas { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        .status-pill { position: absolute; top: 12px; right: 12px; z-index: 20; background: rgba(0,0,0,0.8); padding: 6px 15px; border-radius: 20px; font-size: 0.8rem; border: 1px solid #3f3f46; }
+
+        .timer-box { flex: 1 1 500px; background: var(--card); padding: 25px; border-radius: 15px; border: 1px solid #27272a; }
+        #timer { font-size: 5rem; font-family: 'Courier New', monospace; font-weight: bold; color: var(--primary); margin: 10px 0; text-align: center; }
+        #active-q-label { text-align: center; color: var(--active); font-weight: bold; margin-bottom: 10px; font-size: 1.2rem; }
+
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        button { padding: 15px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 1rem; color: white; }
+        #playPauseBtn { background: #22c55e; grid-column: span 2; }
+        #playPauseBtn.paused { background: #f59e0b; }
+        .btn-lap { background: var(--primary); }
+        .btn-pdf { background: #3f3f46; }
+
+        .logs { margin-top: 20px; background: #000; border-radius: 10px; padding: 10px; height: 250px; overflow-y: auto; border: 1px solid #27272a; }
+        .log-entry { display: flex; justify-content: space-between; padding: 12px; border-radius: 8px; margin-bottom: 5px; cursor: pointer; border: 1px solid transparent; background: #111; }
+        .log-entry.active { border-color: var(--active); background: rgba(34, 197, 94, 0.1); }
+        .log-entry b { color: var(--primary); }
+
+        /* Responsive stack for mobile */
+        @media (max-width: 600px) {
+            #timer { font-size: 3.5rem; }
+            .video-box { flex: 1 1 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>QuestTimer <span style="color:var(--primary)">Elite</span></h1>
+        <input type="text" id="sessionName" placeholder="Enter Session Name...">
+    </div>
+
+    <div class="main-layout">
+        <div class="video-box">
+            <div class="status-pill" id="status">Waiting for Camera...</div>
+            <video id="input_video" playsinline></video>
+            <canvas id="output_canvas"></canvas>
+        </div>
+
+        <div class="timer-box">
+            <div id="active-q-label">Current: Question 1</div>
+            <div id="timer">00:00.00</div>
+            
+            <div class="btn-group">
+                <button id="playPauseBtn" onclick="toggleTimer()">Start Session</button>
+                <button class="btn-lap" onclick="forceNextQuestion()">Next Question (✋/👍)</button>
+                <button class="btn-pdf" onclick="exportPDF()">Export PDF Report</button>
+            </div>
+            
+            <div class="logs" id="log-list"></div>
+        </div>
+    </div>
+
+    <script>
+        const timerDisplay = document.getElementById('timer');
+        const logList = document.getElementById('log-list');
+        const statusPill = document.getElementById('status');
+        const playPauseBtn = document.getElementById('playPauseBtn');
+
+        let isRunning = false;
+        let activeQuestionIndex = 0;
+        let questionData = [{ id: 1, timeMs: 0, lastTimestamp: '' }];
+        let totalSessionTimeMs = 0;
+        let sessionStartTime = null;
+        let lastTickTime = null;
+        let canTrigger = true;
+
+        function formatTime(ms) {
+            let m = Math.floor(ms / 60000);
+            let s = Math.floor((ms % 60000) / 1000);
+            let cs = Math.floor((ms % 1000) / 10);
+            return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
+        }
+
+        function update() {
+            if (!isRunning) return;
+            
+            const now = performance.now();
+            const delta = now - lastTickTime;
+            lastTickTime = now;
+
+            // Track time for active question AND total session
+            questionData[activeQuestionIndex].timeMs += delta;
+            totalSessionTimeMs += delta;
+            questionData[activeQuestionIndex].lastTimestamp = new Date().toLocaleTimeString();
+            
+            timerDisplay.innerText = formatTime(questionData[activeQuestionIndex].timeMs);
+            renderLogs();
+            requestAnimationFrame(update);
+        }
+
+        function toggleTimer() {
+            if (!isRunning) {
+                isRunning = true;
+                lastTickTime = performance.now();
+                if (!sessionStartTime) sessionStartTime = new Date();
+                playPauseBtn.innerText = "Pause Session";
+                playPauseBtn.classList.add('paused');
+                update();
+            } else {
+                isRunning = false;
+                playPauseBtn.innerText = "Resume Session";
+                playPauseBtn.classList.remove('paused');
+            }
+        }
+
+        // --- THE "ALWAYS NEW" LOGIC ---
+        function forceNextQuestion() {
+            if (!isRunning) return;
+            
+            // Increment ID based on the total count ever created
+            const newId = questionData.length + 1;
+            questionData.push({ id: newId, timeMs: 0, lastTimestamp: '' });
+            
+            // Always set active index to the newly created question
+            activeQuestionIndex = questionData.length - 1;
+            
+            statusPill.innerText = `Created New Q${newId}`;
+            document.getElementById('active-q-label').innerText = `Current: Question ${newId}`;
+            timerDisplay.innerText = "00:00.00";
+        }
+
+        function switchQuestion(index) {
+            activeQuestionIndex = index;
+            document.getElementById('active-q-label').innerText = `Current: Question ${questionData[index].id}`;
+            timerDisplay.innerText = formatTime(questionData[index].timeMs);
+            renderLogs();
+        }
+
+        function renderLogs() {
+            logList.innerHTML = '';
+            // We show logs in reverse order (newest on top)
+            for (let i = questionData.length - 1; i >= 0; i--) {
+                const q = questionData[i];
+                const div = document.createElement('div');
+                div.className = `log-entry ${i === activeQuestionIndex ? 'active' : ''}`;
+                div.onclick = () => switchQuestion(i);
+                div.innerHTML = `
+                    <span>Question ${q.id}</span>
+                    <span><b>${formatTime(q.timeMs)}</b></span>
+                `;
+                logList.appendChild(div);
+            }
+        }
+
+        function exportPDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            const sName = document.getElementById('sessionName').value || "QuestTimer Session";
+            
+            doc.setFontSize(22);
+            doc.setTextColor(168, 85, 247); // Primary color
+            doc.text(sName, 20, 20);
+            
+            doc.setFontSize(10);
+            doc.setTextColor(100);
+            doc.text(`Started: ${sessionStartTime ? sessionStartTime.toLocaleString() : 'N/A'}`, 20, 30);
+            doc.text(`Report Generated: ${new Date().toLocaleString()}`, 20, 35);
+            doc.line(20, 38, 190, 38);
+
+            doc.setTextColor(0);
+            doc.setFontSize(12);
+            questionData.forEach((q, i) => {
+                const yPos = 50 + (i * 10);
+                doc.text(`Q${q.id}`, 20, yPos);
+                doc.text(`Duration: ${formatTime(q.timeMs)}`, 50, yPos);
+                doc.text(`Last Active: ${q.lastTimestamp}`, 120, yPos);
+                
+                if (yPos > 270) { doc.addPage(); }
+            });
+
+            // Footer with Total Time
+            const finalY = doc.internal.pageSize.height - 20;
+            doc.line(20, finalY - 5, 190, finalY - 5);
+            doc.setFontSize(14);
+            doc.text(`TOTAL PRODUCTIVE SESSION TIME: ${formatTime(totalSessionTimeMs)}`, 20, finalY);
+            
+            doc.save(`${sName.replace(/\s+/g, '_')}_report.pdf`);
+        }
+
+        // --- AI ENGINE ---
+        function onResults(results) {
+            const canvasCtx = document.getElementById('output_canvas').getContext('2d');
+            canvasCtx.clearRect(0, 0, 640, 480);
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                const isHandUp = landmarks[12].y < landmarks[0].y - 0.2;
+
+                if (isHandUp && canTrigger && isRunning) {
+                    forceNextQuestion();
+                    canTrigger = false;
+                    statusPill.style.color = "#22c55e";
+                    setTimeout(() => {
+                        canTrigger = true;
+                        statusPill.style.color = "white";
+                    }, 2500); 
+                }
+            }
+        }
+
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.5});
+        hands.onResults(onResults);
+
+        const camera = new Camera(document.getElementById('input_video'), {
+            onFrame: async () => { await hands.send({image: document.getElementById('input_video')}); },
+            width: 640, height: 480
+        });
+        camera.start().then(() => statusPill.innerText = "Hand AI Ready");
+    </script>
+</body>
+</html>
